@@ -1,15 +1,19 @@
 extern crate datadog_badges;
 
 use std::env;
+use std::net::ToSocketAddrs;
+use std::process::exit;
 
 use chrono::Utc;
+use getopts::Options;
 use regex::Regex;
-use warp::{Filter, http::Response, Rejection};
 use warp::reject::not_found;
+use warp::{http::Response, Filter, Rejection};
 
-use datadog_badges::badge::{Badge, BadgeOptions, COLOR_DANGER, COLOR_OTHER, COLOR_SUCCESS, COLOR_WARNING};
+use datadog_badges::badge::{
+    Badge, BadgeOptions, COLOR_DANGER, COLOR_OTHER, COLOR_SUCCESS, COLOR_WARNING,
+};
 use datadog_badges::datadog::{get_monitor_details, MonitorState};
-use std::process::exit;
 
 fn error_badge(status: u16, message: String) -> Result<Response<String>, Rejection> {
     Response::builder()
@@ -22,7 +26,8 @@ fn error_badge(status: u16, message: String) -> Result<Response<String>, Rejecti
                 status: message.to_owned(),
                 color: COLOR_DANGER.to_owned(),
                 ..BadgeOptions::default()
-            }).to_svg()
+            })
+            .to_svg(),
         )
         .map_err(|_| not_found())
 }
@@ -30,7 +35,9 @@ fn error_badge(status: u16, message: String) -> Result<Response<String>, Rejecti
 async fn get_badge(account: String, id: String) -> Result<Response<String>, Rejection> {
     let client = reqwest::Client::new();
     let env_root = account.to_string().to_uppercase();
-    let env_root = Regex::new(r"[^A-Z0-9_]").unwrap().replace_all(&env_root, "_");
+    let env_root = Regex::new(r"[^A-Z0-9_]")
+        .unwrap()
+        .replace_all(&env_root, "_");
     let app_key = env::var(format!("{}_APP_KEY", env_root));
     let api_key = env::var(format!("{}_API_KEY", env_root));
     if let (Ok(api_key), Ok(app_key)) = (api_key, app_key) {
@@ -47,7 +54,7 @@ async fn get_badge(account: String, id: String) -> Result<Response<String>, Reje
                             Badge::new(BadgeOptions {
                                 duration: match value.overall_state_modified {
                                     Some(v) => Some(Utc::now().signed_duration_since(v)),
-                                    None => None
+                                    None => None,
                                 },
                                 color: match value.overall_state.to_uppercase().as_str() {
                                     "OK" => COLOR_SUCCESS.to_owned(),
@@ -58,10 +65,15 @@ async fn get_badge(account: String, id: String) -> Result<Response<String>, Reje
                                 status: value.overall_state,
                                 muted: !value.options.silenced.is_empty(),
                                 ..BadgeOptions::default()
-                            }).to_svg()
-                        ).map_err(|_| not_found())
+                            })
+                            .to_svg(),
+                        )
+                        .map_err(|_| not_found())
                 } else {
-                    error_badge(response.status().as_u16(), response.status().as_str().to_owned())
+                    error_badge(
+                        response.status().as_u16(),
+                        response.status().as_str().to_owned(),
+                    )
                 }
             }
         }
@@ -70,14 +82,65 @@ async fn get_badge(account: String, id: String) -> Result<Response<String>, Reje
     }
 }
 
+fn print_usage(program: &str, opts: &Options) {
+    let brief = format!("Usage: {} [options]", program);
+    println!("{}", opts.usage(&brief));
+    println!();
+}
+
 #[tokio::main]
 async fn main() {
-    ctrlc::set_handler(||{
-        exit(0);
+    let _ = ctrlc::set_handler(|| {
+        println!("Stopped");
+        exit(0)
     });
-    let badge = warp::path("account").and(warp::path::param()).and(warp::path("monitors")).and(warp::path::param())
+    let mut opts = Options::new();
+    opts.optflag("h", "help", "print this help menu and exit");
+    opts.optflag("V", "version", "print the version and exit");
+    opts.optopt("", "host", "the host name to bind to (default: 0.0.0.0)", "HOST");
+    opts.optopt("", "port", "the port to bind to (default: 8080)", "PORT");
+
+    // set up to parse the command line options
+    const VERSION: &str = env!("CARGO_PKG_VERSION");
+    let args: Vec<String> = env::args().collect();
+    let program = args[0].clone();
+    let matches = match opts.parse(&args[1..]) {
+        Ok(m) => m,
+        Err(f) => panic!(f.to_string()),
+    };
+
+    // process and validate the command line options
+    if matches.opt_present("h") {
+        print_usage(&program, &opts);
+        return;
+    }
+    if matches.opt_present("V") {
+        println!("{}", VERSION);
+        return;
+    }
+    let host_port = format!(
+        "{}:{}",
+        matches
+            .opt_get("host")
+            .unwrap_or(None)
+            .unwrap_or("0.0.0.0".to_owned()),
+        matches.opt_get_default("port", 8080).unwrap()
+    );
+
+    let badge = warp::path("account")
+        .and(warp::path::param())
+        .and(warp::path("monitors"))
+        .and(warp::path::param())
         .and_then(get_badge);
+    println!("Listening for connections on {}", host_port);
     warp::serve(badge)
-        .run(([0, 0, 0, 0], 8080))
+        .run(
+            host_port
+                .as_str()
+                .to_socket_addrs()
+                .unwrap()
+                .next()
+                .unwrap(),
+        )
         .await;
 }

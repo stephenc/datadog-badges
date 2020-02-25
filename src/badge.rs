@@ -4,7 +4,7 @@ extern crate rusttype;
 
 use base64::display::Base64Display;
 use chrono::Duration;
-use rusttype::{Font, FontCollection, point, Point, PositionedGlyph, Scale};
+use rusttype::{point, Font, FontCollection, Point, PositionedGlyph, Scale};
 
 const FONT_DATA: &'static [u8] = include_bytes!("DejaVuSans.ttf");
 const FONT_SIZE: f32 = 11.;
@@ -29,7 +29,6 @@ pub struct BadgeOptions {
     pub muted: bool,
 }
 
-
 impl Default for BadgeOptions {
     fn default() -> BadgeOptions {
         BadgeOptions {
@@ -41,14 +40,12 @@ impl Default for BadgeOptions {
     }
 }
 
-
 pub struct Badge {
     options: BadgeOptions,
     font: Font<'static>,
     scale: Scale,
     offset: Point<f32>,
 }
-
 
 impl Badge {
     pub fn new(options: BadgeOptions) -> Badge {
@@ -69,12 +66,12 @@ impl Badge {
         }
     }
 
-
     pub fn to_svg_data_uri(&self) -> String {
-        format!("data:image/svg+xml;base64,{}",
-                Base64Display::with_config(self.to_svg().as_bytes(), base64::STANDARD))
+        format!(
+            "data:image/svg+xml;base64,{}",
+            Base64Display::with_config(self.to_svg().as_bytes(), base64::STANDARD)
+        )
     }
-
 
     fn as_human_str(d: &Duration) -> String {
         let weeks = d.num_weeks();
@@ -112,13 +109,14 @@ impl Badge {
     pub fn to_svg(&self) -> String {
         let duration = match &self.options.duration {
             Some(v) => Self::as_human_str(v),
-            None => "n/a".to_owned()
+            None => "n/a".to_owned(),
         };
         let left_width = self.calculate_width(&self.options.status) + 6;
         let right_width = self.calculate_width(&duration) + 6;
         let offset = if self.options.muted { 20 } else { 0 };
 
-        let svg = format!(r###"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{}" height="20">
+        let svg = format!(
+            r###"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{}" height="20">
   <linearGradient id="smooth" x2="0" y2="100%">
     <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
     <stop offset="1" stop-opacity=".1"/>
@@ -142,31 +140,32 @@ impl Badge {
     <text x="{}" y="14">{}</text>
   </g>
 </svg>"###,
-                          offset + left_width + right_width,
-                          offset + left_width + right_width,
-                          offset + left_width,
-                          self.options.color,
-                          offset + left_width,
-                          right_width,
-                          offset + left_width + right_width,
-                          if self.options.muted { MUTE } else { "" },
-                          offset + (left_width) / 2,
-                          &self.options.status,
-                          offset + (left_width) / 2,
-                          &self.options.status,
-                          offset + left_width + (right_width / 2),
-                          &duration,
-                          offset + left_width + (right_width / 2),
-                          &duration);
+            offset + left_width + right_width,
+            offset + left_width + right_width,
+            offset + left_width,
+            self.options.color,
+            offset + left_width,
+            right_width,
+            offset + left_width + right_width,
+            if self.options.muted { MUTE } else { "" },
+            offset + (left_width) / 2,
+            &self.options.status,
+            offset + (left_width) / 2,
+            &self.options.status,
+            offset + left_width + (right_width / 2),
+            &duration,
+            offset + left_width + (right_width / 2),
+            &duration
+        );
 
         svg
     }
 
-
     fn calculate_width(&self, text: &str) -> u32 {
         let glyphs: Vec<PositionedGlyph> =
             self.font.layout(text, self.scale, self.offset).collect();
-        let width: u32 = glyphs.iter()
+        let width: u32 = glyphs
+            .iter()
             .rev()
             .filter_map(|g| {
                 g.pixel_bounding_box()
@@ -178,7 +177,6 @@ impl Badge {
         width + ((text.len() as u32 - 1) * 2)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
