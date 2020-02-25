@@ -9,6 +9,7 @@ use warp::reject::not_found;
 
 use datadog_badges::badge::{Badge, BadgeOptions, COLOR_DANGER, COLOR_OTHER, COLOR_SUCCESS, COLOR_WARNING};
 use datadog_badges::datadog::{get_monitor_details, MonitorState};
+use std::process::exit;
 
 fn error_badge(status: u16, message: String) -> Result<Response<String>, Rejection> {
     Response::builder()
@@ -29,7 +30,7 @@ fn error_badge(status: u16, message: String) -> Result<Response<String>, Rejecti
 async fn get_badge(account: String, id: String) -> Result<Response<String>, Rejection> {
     let client = reqwest::Client::new();
     let env_root = account.to_string().to_uppercase();
-    let env_root = Regex::new(r"[^A-Z_]").unwrap().replace_all(&env_root, "_");
+    let env_root = Regex::new(r"[^A-Z0-9_]").unwrap().replace_all(&env_root, "_");
     let app_key = env::var(format!("{}_APP_KEY", env_root));
     let api_key = env::var(format!("{}_API_KEY", env_root));
     if let (Ok(api_key), Ok(app_key)) = (api_key, app_key) {
@@ -71,9 +72,12 @@ async fn get_badge(account: String, id: String) -> Result<Response<String>, Reje
 
 #[tokio::main]
 async fn main() {
+    ctrlc::set_handler(||{
+        exit(0);
+    });
     let badge = warp::path("account").and(warp::path::param()).and(warp::path("monitors")).and(warp::path::param())
         .and_then(get_badge);
     warp::serve(badge)
-        .run(([127, 0, 0, 1], 3030))
+        .run(([0, 0, 0, 0], 8080))
         .await;
 }
