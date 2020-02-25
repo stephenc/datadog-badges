@@ -7,8 +7,8 @@ use std::process::exit;
 use chrono::Utc;
 use getopts::Options;
 use regex::Regex;
-use warp::{Filter, http::Response, Rejection};
 use warp::reject::not_found;
+use warp::{http::Response, Filter, Rejection};
 
 use datadog_badges::badge::{
     Badge, BadgeOptions, COLOR_DANGER, COLOR_OTHER, COLOR_SUCCESS, COLOR_WARNING,
@@ -27,12 +27,16 @@ fn error_badge(status: u16, message: String) -> Result<Response<String>, Rejecti
                 color: COLOR_DANGER.to_owned(),
                 ..BadgeOptions::default()
             })
-                .to_svg(),
+            .to_svg(),
         )
         .map_err(|_| not_found())
 }
 
-async fn get_monitor_badge(account: String, id: String) -> Result<Response<String>, Rejection> {
+async fn get_monitor_badge(
+    status_codes: bool,
+    account: String,
+    id: String,
+) -> Result<Response<String>, Rejection> {
     let client = reqwest::Client::new();
     let env_root = account.to_string().to_uppercase();
     let env_root = Regex::new(r"[^A-Z0-9_]")
@@ -43,7 +47,10 @@ async fn get_monitor_badge(account: String, id: String) -> Result<Response<Strin
     if let (Ok(api_key), Ok(app_key)) = (api_key, app_key) {
         let details = get_monitor_details(&client, &api_key, &app_key, &id).await;
         match details {
-            Err(_) => error_badge(500, "HTTP/500 Internal Server Error".to_owned()),
+            Err(_) => error_badge(
+                if status_codes { 500 } else { 200 },
+                "HTTP/500 Internal Server Error".to_owned(),
+            ),
             Ok(response) => {
                 if response.status().is_success() {
                     let value: MonitorState = response.json().await.map_err(|_| not_found())?;
@@ -66,19 +73,22 @@ async fn get_monitor_badge(account: String, id: String) -> Result<Response<Strin
                                 muted: !value.options.silenced.is_empty(),
                                 ..BadgeOptions::default()
                             })
-                                .to_svg(),
+                            .to_svg(),
                         )
                         .map_err(|_| not_found())
                 } else {
                     error_badge(
-                        response.status().as_u16(),
+                        if status_codes { 500 } else { 200 },
                         response.status().as_str().to_owned(),
                     )
                 }
             }
         }
     } else {
-        error_badge(404, "HTTP/404 Not Found".to_owned())
+        error_badge(
+            if status_codes { 500 } else { 200 },
+            "HTTP/404 Not Found".to_owned(),
+        )
     }
 }
 
@@ -110,6 +120,11 @@ async fn main() {
         "the context root to serve from (default: /)",
         "ROOT",
     );
+    opts.optflag(
+        "",
+        "always-ok",
+        "Always return images with status code HTTP/200",
+    );
 
     // set up to parse the command line options
     const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -137,34 +152,51 @@ async fn main() {
             .unwrap_or("0.0.0.0".to_owned()),
         matches.opt_get_default("port", 8080).unwrap()
     );
+    let status_codes = !matches.opt_present("always-ok");
 
     let monitor_badge = warp::path("accounts")
         .and(warp::path::param())
         .and(warp::path("monitors"))
         .and(warp::path::param())
-        .and_then(get_monitor_badge);
-    println!("Listening for connections on {}{}", host_port, matches.opt_default("context-root", "/").unwrap_or("/".to_owned()));
+        .and_then(move |account, id| get_monitor_badge(status_codes, account, id));
+    let fallback = warp::any().map(|| {
+        Response::builder()
+            .status(404)
+            .header("Content-Type", "text/html; charset=UTF-8")
+            .body(include_str!("404.html"))
+    });
+    println!(
+        "Listening for connections on {}/{}",
+        host_port,
+        matches
+            .opt_default("context-root", "/")
+            .unwrap_or("/".to_owned())
+    );
 
-    let root = matches.opt_default("context-root", "/").unwrap_or("/".to_owned());
+    let root = matches
+        .opt_default("context-root", "/")
+        .unwrap_or("/".to_owned());
     if root != "/" && root != "" {
-        warp::serve(monitor_badge).run(
-            host_port
-                .as_str()
-                .to_socket_addrs()
-                .unwrap()
-                .next()
-                .unwrap(),
-        )
+        warp::serve(warp::path(root).and(monitor_badge).or(fallback))
+            .run(
+                host_port
+                    .as_str()
+                    .to_socket_addrs()
+                    .unwrap()
+                    .next()
+                    .unwrap(),
+            )
             .await;
     } else {
-        warp::serve(monitor_badge).run(
-            host_port
-                .as_str()
-                .to_socket_addrs()
-                .unwrap()
-                .next()
-                .unwrap(),
-        )
+        warp::serve(monitor_badge.or(fallback))
+            .run(
+                host_port
+                    .as_str()
+                    .to_socket_addrs()
+                    .unwrap()
+                    .next()
+                    .unwrap(),
+            )
             .await;
     }
 }
