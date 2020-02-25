@@ -7,8 +7,8 @@ use std::process::exit;
 use chrono::Utc;
 use getopts::Options;
 use regex::Regex;
+use warp::{Filter, http::Response, Rejection};
 use warp::reject::not_found;
-use warp::{http::Response, Filter, Rejection};
 
 use datadog_badges::badge::{
     Badge, BadgeOptions, COLOR_DANGER, COLOR_OTHER, COLOR_SUCCESS, COLOR_WARNING,
@@ -27,12 +27,12 @@ fn error_badge(status: u16, message: String) -> Result<Response<String>, Rejecti
                 color: COLOR_DANGER.to_owned(),
                 ..BadgeOptions::default()
             })
-            .to_svg(),
+                .to_svg(),
         )
         .map_err(|_| not_found())
 }
 
-async fn get_badge(account: String, id: String) -> Result<Response<String>, Rejection> {
+async fn get_monitor_badge(account: String, id: String) -> Result<Response<String>, Rejection> {
     let client = reqwest::Client::new();
     let env_root = account.to_string().to_uppercase();
     let env_root = Regex::new(r"[^A-Z0-9_]")
@@ -66,7 +66,7 @@ async fn get_badge(account: String, id: String) -> Result<Response<String>, Reje
                                 muted: !value.options.silenced.is_empty(),
                                 ..BadgeOptions::default()
                             })
-                            .to_svg(),
+                                .to_svg(),
                         )
                         .map_err(|_| not_found())
                 } else {
@@ -97,8 +97,19 @@ async fn main() {
     let mut opts = Options::new();
     opts.optflag("h", "help", "print this help menu and exit");
     opts.optflag("V", "version", "print the version and exit");
-    opts.optopt("", "host", "the host name to bind to (default: 0.0.0.0)", "HOST");
+    opts.optopt(
+        "",
+        "host",
+        "the host name to bind to (default: 0.0.0.0)",
+        "HOST",
+    );
     opts.optopt("", "port", "the port to bind to (default: 8080)", "PORT");
+    opts.optopt(
+        "",
+        "context-root",
+        "the context root to serve from (default: /)",
+        "ROOT",
+    );
 
     // set up to parse the command line options
     const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -127,14 +138,16 @@ async fn main() {
         matches.opt_get_default("port", 8080).unwrap()
     );
 
-    let badge = warp::path("account")
+    let monitor_badge = warp::path("accounts")
         .and(warp::path::param())
         .and(warp::path("monitors"))
         .and(warp::path::param())
-        .and_then(get_badge);
-    println!("Listening for connections on {}", host_port);
-    warp::serve(badge)
-        .run(
+        .and_then(get_monitor_badge);
+    println!("Listening for connections on {}{}", host_port, matches.opt_default("context-root", "/").unwrap_or("/".to_owned()));
+
+    let root = matches.opt_default("context-root", "/").unwrap_or("/".to_owned());
+    if root != "/" && root != "" {
+        warp::serve(monitor_badge).run(
             host_port
                 .as_str()
                 .to_socket_addrs()
@@ -142,5 +155,16 @@ async fn main() {
                 .next()
                 .unwrap(),
         )
-        .await;
+            .await;
+    } else {
+        warp::serve(monitor_badge).run(
+            host_port
+                .as_str()
+                .to_socket_addrs()
+                .unwrap()
+                .next()
+                .unwrap(),
+        )
+            .await;
+    }
 }
