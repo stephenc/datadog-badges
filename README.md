@@ -2,6 +2,16 @@
 
 A simple badge server that will expose small badges for the status of Datadog monitors.
 
+Each badge reports: 
+
+* whether the monitor is muted or not
+* the current status of the monitor
+* how long the current status has been in effect
+
+Example:
+
+![Sample badge](example.svg)
+
 ## Usage
 
 You will need an API Key and an Application Key for each team you want to expose badges for and set them as appropriately named environment variables.
@@ -12,4 +22,12 @@ If your team's Datadog is hosted at `example-team.datadoghq.com` then you would 
 
 The badges will be available at URLs: `http://hostname:8080/account/{subdomain}/monitors/{monitorId}`.
 Using our example again, monitor 12345 would be exposed on `http://hostname:8080/account/example-team/monitors/12345` 
+
+## Docker image
+
+The service is also available as a docker image: [`stephenc/datadog-badges`](https://hub.docker.com/r/stephenc/datadog-badges)
+
+```bash
+docker run -e EXAMPLE_TEAM_APP_KEY=... -e EXAMPLE_TEAM_API_KEY=... -p 8080:8080 stephenc/datadog-badges
+``` 
 
