@@ -1,5 +1,7 @@
 # Datadog Badges
 
+[![Badges! We don't need no stinking badges!](https://img.youtube.com/vi/VqomZQMZQCQ/0.jpg)](https://www.youtube.com/watch?v=VqomZQMZQCQ)
+
 A simple badge server that will expose small badges for the status of Datadog monitors.
 
 Each badge reports: 
@@ -22,6 +24,9 @@ If your team's Datadog is hosted at `example-team.datadoghq.com` then you would 
 
 The badges will be available at URLs: `http://hostname:8080/account/{subdomain}/monitors/{monitorId}`.
 Using our example again, monitor 12345 would be exposed on `http://hostname:8080/account/example-team/monitors/12345` 
+
+The query parameter `?q` can be used to filter the results of the status check, using our best guess as to how filters work, e.g. `http://hostname:8080/account/example-team/monitors/12345?q=env%3Aprod` should give the same results as available from datadog at `https://example-team.datadoghq.com/monitors/12345?q=env%3Aprod`. 
+Pull Requests welcome if you identify any issues with how we parse this string compared with how Datadog parses it.
 
 The following line options cane be used to modify the server configuration:
 

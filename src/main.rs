@@ -4,6 +4,7 @@ extern crate env_logger;
 #[macro_use]
 extern crate log;
 
+use std::collections::BTreeMap;
 use std::env;
 use std::net::ToSocketAddrs;
 use std::process::exit;
@@ -21,21 +22,27 @@ use warp::{http::Response, Filter, Rejection};
 use datadog_badges::badge::{
     Badge, BadgeOptions, COLOR_DANGER, COLOR_OTHER, COLOR_SUCCESS, COLOR_WARNING,
 };
-use datadog_badges::datadog::{get_monitor_details, MonitorState};
+use datadog_badges::datadog::{get_monitor_details, MonitorState, MonitorStatus};
 
 async fn get_monitor_badge(
     status_codes: bool,
     account: String,
     id: String,
+    query: BTreeMap<String, String>,
 ) -> Result<Response<String>, Rejection> {
-    const MAX_AGE_SECONDS: Lazy<u64> = Lazy::new(|| match env::var("CACHE_TTL_SECONDS") {
+    static MAX_AGE_SECONDS: Lazy<u64> = Lazy::new(|| match env::var("CACHE_TTL_SECONDS") {
         Ok(value) => value.parse::<u64>().unwrap_or(15),
         Err(_) => 15,
     });
-    static BADGE_CACHE: Lazy<Mutex<TimedCache<(String, String), (BadgeOptions, u16)>>> =
-        Lazy::new(|| Mutex::new(TimedCache::with_lifespan(*MAX_AGE_SECONDS)));
+    static BADGE_CACHE: Lazy<
+        Mutex<TimedCache<(String, String, BTreeMap<String, String>), (BadgeOptions, u16)>>,
+    > = Lazy::new(|| Mutex::new(TimedCache::with_lifespan(*MAX_AGE_SECONDS)));
 
-    let key = (account.clone(), id.clone());
+    let mut query = query.clone();
+    query.remove("badge-poll");
+    let query = query;
+
+    let key = (account.clone(), id.clone(), query.clone());
     let max_age: u64 = *MAX_AGE_SECONDS;
     {
         let mut cache = BADGE_CACHE.lock().unwrap();
@@ -43,10 +50,7 @@ async fn get_monitor_badge(
             return Response::builder()
                 .status(*status_code)
                 .header("Content-Type", "image/svg+xml")
-                .header(
-                    "Cache-Control",
-                    format!("public,max-age={}", max_age),
-                )
+                .header("Cache-Control", format!("public,max-age={}", max_age))
                 .body(Badge::new(options.clone()).to_svg())
                 .map_err(|_| not_found());
         }
@@ -59,7 +63,8 @@ async fn get_monitor_badge(
     let app_key = env::var(format!("{}_DATADOG_APP_KEY", env_root));
     let api_key = env::var(format!("{}_DATADOG_API_KEY", env_root));
     let value = if let (Ok(api_key), Ok(app_key)) = (api_key, app_key) {
-        let details = get_monitor_details(&client, &api_key, &app_key, &id).await;
+        let details =
+            get_monitor_details(&client, &api_key, &app_key, &id, query.get("g").is_some()).await;
         match details {
             Err(_) => (
                 BadgeOptions {
@@ -72,19 +77,25 @@ async fn get_monitor_badge(
             Ok(response) => {
                 if response.status().is_success() {
                     let value: MonitorState = response.json().await.map_err(|_| not_found())?;
+                    let (status, since) = value.status(query.get("q").map(String::as_ref));
                     (
                         BadgeOptions {
-                            duration: match value.overall_state_modified {
+                            duration: match since {
                                 Some(v) => Some(Utc::now().signed_duration_since(v)),
                                 None => None,
                             },
-                            color: match value.overall_state.to_uppercase().as_str() {
-                                "OK" => COLOR_SUCCESS.to_owned(),
-                                "ALERT" => COLOR_DANGER.to_owned(),
-                                "WARNING" => COLOR_WARNING.to_owned(),
-                                _ => COLOR_OTHER.to_owned(),
+                            color: match &status {
+                                MonitorStatus::Ok => COLOR_SUCCESS.to_owned(),
+                                MonitorStatus::Alert => COLOR_DANGER.to_owned(),
+                                MonitorStatus::Warn => COLOR_WARNING.to_owned(),
+                                MonitorStatus::NoData => COLOR_OTHER.to_owned(),
                             },
-                            status: value.overall_state,
+                            status: match &status {
+                                MonitorStatus::Ok => "Ok".to_owned(),
+                                MonitorStatus::Alert => "Alert".to_owned(),
+                                MonitorStatus::Warn => "Warn".to_owned(),
+                                MonitorStatus::NoData => "No Data".to_owned(),
+                            },
                             muted: !value.options.silenced.is_empty(),
                         },
                         200,
@@ -123,10 +134,7 @@ async fn get_monitor_badge(
     Response::builder()
         .status(status_code)
         .header("Content-Type", "image/svg+xml")
-        .header(
-            "Cache-Control",
-            format!("public,max-age={}", max_age),
-        )
+        .header("Cache-Control", format!("public,max-age={}", max_age))
         .body(Badge::new(options).to_svg())
         .map_err(|_| not_found())
 }
@@ -194,13 +202,13 @@ async fn main() {
     );
     let status_codes = !matches.opt_present("always-ok");
 
-
     let log = warp::log("access");
     let monitor_badge = warp::path("accounts")
         .and(warp::path::param())
         .and(warp::path("monitors"))
         .and(warp::path::param())
-        .and_then(move |account, id| get_monitor_badge(status_codes, account, id));
+        .and(warp::query::query())
+        .and_then(move |account, id, query| get_monitor_badge(status_codes, account, id, query));
     let fallback = warp::any().map(|| {
         Response::builder()
             .status(404)

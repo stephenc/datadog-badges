@@ -43,6 +43,9 @@ features = ["derive"]
 [dependencies.serde_json]
  version = "1.0.45"
 
+[dependencies.serde_urlencoded]
+version = "0.6.1"
+
 [dependencies.tokio]
 version = "0.2.11"
 features = ["macros"]
