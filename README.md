@@ -23,6 +23,30 @@ If your team's Datadog is hosted at `example-team.datadoghq.com` then you would 
 The badges will be available at URLs: `http://hostname:8080/account/{subdomain}/monitors/{monitorId}`.
 Using our example again, monitor 12345 would be exposed on `http://hostname:8080/account/example-team/monitors/12345` 
 
+The following line options cane be used to modify the server configuration:
+
+```
+Usage: datadog-badges [options]
+
+Options:
+    -h, --help          print this help menu and exit
+    -V, --version       print the version and exit
+        --host HOST     the host name to bind to (default: 0.0.0.0)
+        --port PORT     the port to bind to (default: 8080)
+        --context-root ROOT
+                        the context root to serve from (default: /)
+        --always-ok     Always return images with status code HTTP/200
+```
+
+*NOTE:* The Context Root may not contain `/` so can only be used to configure a single segment.
+
+*NOTE:* By default, the HTTP response for images returned will match the status code returned by the Datadog. 
+This can cause confusion for web browsers when you try to access non-existing monitors.
+The `--always-ok` option disables this behaviour.
+
+Additionally, the default image response caching can be configured using the `CACHE_TTL_SECONDS` environment variable.
+If not specified, or if not a valid unsigned integer, it will default to `15` seconds.
+
 ## Docker image
 
 The service is also available as a docker image: [`stephenc/datadog-badges`](https://hub.docker.com/r/stephenc/datadog-badges)

@@ -1,10 +1,18 @@
+extern crate cached;
 extern crate datadog_badges;
+extern crate env_logger;
+#[macro_use]
+extern crate log;
 
 use std::env;
 use std::net::ToSocketAddrs;
 use std::process::exit;
+use std::sync::Mutex;
 
+use cached::once_cell::sync::Lazy;
+use cached::{Cached, TimedCache};
 use chrono::Utc;
+use env_logger::Env;
 use getopts::Options;
 use regex::Regex;
 use warp::reject::not_found;
@@ -15,28 +23,34 @@ use datadog_badges::badge::{
 };
 use datadog_badges::datadog::{get_monitor_details, MonitorState};
 
-fn error_badge(status: u16, message: String) -> Result<Response<String>, Rejection> {
-    Response::builder()
-        .status(status)
-        .header("Content-Type", "image/svg+xml")
-        .header("Cache-Control", "public,max-age=15")
-        .body(
-            Badge::new(BadgeOptions {
-                duration: None,
-                status: message.to_owned(),
-                color: COLOR_DANGER.to_owned(),
-                ..BadgeOptions::default()
-            })
-            .to_svg(),
-        )
-        .map_err(|_| not_found())
-}
-
 async fn get_monitor_badge(
     status_codes: bool,
     account: String,
     id: String,
 ) -> Result<Response<String>, Rejection> {
+    const MAX_AGE_SECONDS: Lazy<u64> = Lazy::new(|| match env::var("CACHE_TTL_SECONDS") {
+        Ok(value) => value.parse::<u64>().unwrap_or(15),
+        Err(_) => 15,
+    });
+    static BADGE_CACHE: Lazy<Mutex<TimedCache<(String, String), (BadgeOptions, u16)>>> =
+        Lazy::new(|| Mutex::new(TimedCache::with_lifespan(*MAX_AGE_SECONDS)));
+
+    let key = (account.clone(), id.clone());
+    let max_age: u64 = *MAX_AGE_SECONDS;
+    {
+        let mut cache = BADGE_CACHE.lock().unwrap();
+        if let Some((options, status_code)) = cache.cache_get(&key) {
+            return Response::builder()
+                .status(*status_code)
+                .header("Content-Type", "image/svg+xml")
+                .header(
+                    "Cache-Control",
+                    format!("public,max-age={}", max_age),
+                )
+                .body(Badge::new(options.clone()).to_svg())
+                .map_err(|_| not_found());
+        }
+    }
     let client = reqwest::Client::new();
     let env_root = account.to_string().to_uppercase();
     let env_root = Regex::new(r"[^A-Z0-9_]")
@@ -44,52 +58,77 @@ async fn get_monitor_badge(
         .replace_all(&env_root, "_");
     let app_key = env::var(format!("{}_APP_KEY", env_root));
     let api_key = env::var(format!("{}_API_KEY", env_root));
-    if let (Ok(api_key), Ok(app_key)) = (api_key, app_key) {
+    let value = if let (Ok(api_key), Ok(app_key)) = (api_key, app_key) {
         let details = get_monitor_details(&client, &api_key, &app_key, &id).await;
         match details {
-            Err(_) => error_badge(
+            Err(_) => (
+                BadgeOptions {
+                    status: "HTTP/500 Internal Server Error".to_owned(),
+                    color: COLOR_WARNING.to_owned(),
+                    ..BadgeOptions::default()
+                },
                 if status_codes { 500 } else { 200 },
-                "HTTP/500 Internal Server Error".to_owned(),
             ),
             Ok(response) => {
                 if response.status().is_success() {
                     let value: MonitorState = response.json().await.map_err(|_| not_found())?;
-                    Response::builder()
-                        .header("Content-Type", "image/svg+xml")
-                        .header("Cache-Control", "public,max-age=15")
-                        .body(
-                            Badge::new(BadgeOptions {
-                                duration: match value.overall_state_modified {
-                                    Some(v) => Some(Utc::now().signed_duration_since(v)),
-                                    None => None,
-                                },
-                                color: match value.overall_state.to_uppercase().as_str() {
-                                    "OK" => COLOR_SUCCESS.to_owned(),
-                                    "ALERT" => COLOR_DANGER.to_owned(),
-                                    "WARNING" => COLOR_WARNING.to_owned(),
-                                    _ => COLOR_OTHER.to_owned(),
-                                },
-                                status: value.overall_state,
-                                muted: !value.options.silenced.is_empty(),
-                                ..BadgeOptions::default()
-                            })
-                            .to_svg(),
-                        )
-                        .map_err(|_| not_found())
+                    (
+                        BadgeOptions {
+                            duration: match value.overall_state_modified {
+                                Some(v) => Some(Utc::now().signed_duration_since(v)),
+                                None => None,
+                            },
+                            color: match value.overall_state.to_uppercase().as_str() {
+                                "OK" => COLOR_SUCCESS.to_owned(),
+                                "ALERT" => COLOR_DANGER.to_owned(),
+                                "WARNING" => COLOR_WARNING.to_owned(),
+                                _ => COLOR_OTHER.to_owned(),
+                            },
+                            status: value.overall_state,
+                            muted: !value.options.silenced.is_empty(),
+                        },
+                        200,
+                    )
                 } else {
-                    error_badge(
-                        if status_codes { 500 } else { 200 },
-                        response.status().as_str().to_owned(),
+                    (
+                        BadgeOptions {
+                            status: response.status().as_str().to_owned(),
+                            color: COLOR_WARNING.to_owned(),
+                            ..BadgeOptions::default()
+                        },
+                        if status_codes {
+                            response.status().as_u16()
+                        } else {
+                            200
+                        },
                     )
                 }
             }
         }
     } else {
-        error_badge(
-            if status_codes { 500 } else { 200 },
-            "HTTP/404 Not Found".to_owned(),
+        (
+            BadgeOptions {
+                status: "HTTP/404 Not Found".to_owned(),
+                color: COLOR_OTHER.to_owned(),
+                ..BadgeOptions::default()
+            },
+            if status_codes { 404 } else { 200 },
         )
+    };
+    {
+        let mut cache = BADGE_CACHE.lock().unwrap();
+        cache.cache_set(key, value.clone())
     }
+    let (options, status_code) = value;
+    Response::builder()
+        .status(status_code)
+        .header("Content-Type", "image/svg+xml")
+        .header(
+            "Cache-Control",
+            format!("public,max-age={}", max_age),
+        )
+        .body(Badge::new(options).to_svg())
+        .map_err(|_| not_found())
 }
 
 fn print_usage(program: &str, opts: &Options) {
@@ -101,9 +140,10 @@ fn print_usage(program: &str, opts: &Options) {
 #[tokio::main]
 async fn main() {
     let _ = ctrlc::set_handler(|| {
-        println!("Stopped");
+        info!("Stopped");
         exit(0)
     });
+    env_logger::from_env(Env::default().default_filter_or("info,access=info")).init();
     let mut opts = Options::new();
     opts.optflag("h", "help", "print this help menu and exit");
     opts.optflag("V", "version", "print the version and exit");
@@ -149,11 +189,13 @@ async fn main() {
         matches
             .opt_get("host")
             .unwrap_or(None)
-            .unwrap_or("0.0.0.0".to_owned()),
+            .unwrap_or_else(|| "0.0.0.0".to_owned()),
         matches.opt_get_default("port", 8080).unwrap()
     );
     let status_codes = !matches.opt_present("always-ok");
 
+
+    let log = warp::log("access");
     let monitor_badge = warp::path("accounts")
         .and(warp::path::param())
         .and(warp::path("monitors"))
@@ -165,19 +207,19 @@ async fn main() {
             .header("Content-Type", "text/html; charset=UTF-8")
             .body(include_str!("404.html"))
     });
-    println!(
+    info!(
         "Listening for connections on {}/{}",
         host_port,
         matches
             .opt_default("context-root", "/")
-            .unwrap_or("/".to_owned())
+            .unwrap_or_else(|| "/".to_owned())
     );
 
     let root = matches
         .opt_default("context-root", "/")
-        .unwrap_or("/".to_owned());
+        .unwrap_or_else(|| "/".to_owned());
     if root != "/" && root != "" {
-        warp::serve(warp::path(root).and(monitor_badge).or(fallback))
+        warp::serve(warp::path(root).and(monitor_badge).or(fallback).with(log))
             .run(
                 host_port
                     .as_str()
@@ -188,7 +230,7 @@ async fn main() {
             )
             .await;
     } else {
-        warp::serve(monitor_badge.or(fallback))
+        warp::serve(monitor_badge.or(fallback).with(log))
             .run(
                 host_port
                     .as_str()

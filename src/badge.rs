@@ -6,7 +6,7 @@ use base64::display::Base64Display;
 use chrono::Duration;
 use rusttype::{point, Font, FontCollection, Point, PositionedGlyph, Scale};
 
-const FONT_DATA: &'static [u8] = include_bytes!("DejaVuSans.ttf");
+const FONT_DATA: &[u8] = include_bytes!("DejaVuSans.ttf");
 const FONT_SIZE: f32 = 11.;
 
 const MUTE: &str = r#"<path
@@ -18,6 +18,7 @@ pub const COLOR_WARNING: &str = "#ffb52b";
 pub const COLOR_SUCCESS: &str = "#41c464";
 pub const COLOR_OTHER: &str = "#949196";
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct BadgeOptions {
     /// Status will be displayed on the left side of badge
     pub status: String,
@@ -59,10 +60,10 @@ impl Badge {
         let v_metrics = font.v_metrics(scale);
         let offset = point(0.0, v_metrics.ascent);
         Badge {
-            options: options,
-            font: font,
-            scale: scale,
-            offset: offset,
+            options,
+            font,
+            scale,
+            offset,
         }
     }
 
@@ -73,7 +74,7 @@ impl Badge {
         )
     }
 
-    fn as_human_str(d: &Duration) -> String {
+    fn human_str(d: &Duration) -> String {
         let weeks = d.num_weeks();
         if weeks > 1 {
             return format!("{} weeks", weeks);
@@ -108,7 +109,7 @@ impl Badge {
 
     pub fn to_svg(&self) -> String {
         let duration = match &self.options.duration {
-            Some(v) => Self::as_human_str(v),
+            Some(v) => Self::human_str(v),
             None => "n/a".to_owned(),
         };
         let left_width = self.calculate_width(&self.options.status) + 6;
