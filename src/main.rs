@@ -56,8 +56,8 @@ async fn get_monitor_badge(
     let env_root = Regex::new(r"[^A-Z0-9_]")
         .unwrap()
         .replace_all(&env_root, "_");
-    let app_key = env::var(format!("{}_APP_KEY", env_root));
-    let api_key = env::var(format!("{}_API_KEY", env_root));
+    let app_key = env::var(format!("{}_DATADOG_APP_KEY", env_root));
+    let api_key = env::var(format!("{}_DATADOG_API_KEY", env_root));
     let value = if let (Ok(api_key), Ok(app_key)) = (api_key, app_key) {
         let details = get_monitor_details(&client, &api_key, &app_key, &id).await;
         match details {
@@ -108,7 +108,7 @@ async fn get_monitor_badge(
     } else {
         (
             BadgeOptions {
-                status: "HTTP/404 Not Found".to_owned(),
+                status: format!("Unconfigured account: {}", account),
                 color: COLOR_OTHER.to_owned(),
                 ..BadgeOptions::default()
             },
