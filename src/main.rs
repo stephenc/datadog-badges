@@ -44,7 +44,7 @@ async fn get_monitor_badge(
     // remove the `ts` query parameter that browser-side JavaScript may inject to force browser refetch
     query.remove("ts");
     // remove the width overrode
-    let width: Option<u32> = query
+    let width = query
         .remove("w")
         .and_then(|v| v.parse().map(Some).unwrap_or(None));
     // remove the height overrode
