@@ -34,9 +34,11 @@ async fn get_monitor_badge(
         Ok(value) => value.parse::<u64>().unwrap_or(15),
         Err(_) => 15,
     });
-    static BADGE_CACHE: Lazy<
-        Mutex<TimedCache<(String, String, BTreeMap<String, String>), (BadgeOptions, u16)>>,
-    > = Lazy::new(|| Mutex::new(TimedCache::with_lifespan(*MAX_AGE_SECONDS)));
+    type CacheKey = (String, String, BTreeMap<String, String>);
+    type CacheValue = (BadgeOptions, u16);
+    type BadgeCache = TimedCache<CacheKey, CacheValue>;
+    static BADGE_CACHE: Lazy<Mutex<BadgeCache>> =
+        Lazy::new(|| Mutex::new(TimedCache::with_lifespan(*MAX_AGE_SECONDS)));
 
     let mut query = query.clone();
     query.remove("badge-poll");
@@ -85,14 +87,23 @@ async fn get_monitor_badge(
                                 None => None,
                             },
                             color: match &status {
-                                MonitorStatus::Ok => COLOR_SUCCESS.to_owned(),
-                                MonitorStatus::Alert => COLOR_DANGER.to_owned(),
+                                MonitorStatus::Ok | MonitorStatus::Skipped => {
+                                    COLOR_SUCCESS.to_owned()
+                                }
+                                MonitorStatus::Alert | MonitorStatus::Unknown => {
+                                    COLOR_DANGER.to_owned()
+                                }
                                 MonitorStatus::Warn => COLOR_WARNING.to_owned(),
-                                MonitorStatus::NoData => COLOR_OTHER.to_owned(),
+                                MonitorStatus::NoData | MonitorStatus::Ignored => {
+                                    COLOR_OTHER.to_owned()
+                                }
                             },
                             status: match &status {
+                                MonitorStatus::Ignored => "Ignored".to_owned(),
+                                MonitorStatus::Skipped => "Skipped".to_owned(),
                                 MonitorStatus::Ok => "Ok".to_owned(),
                                 MonitorStatus::Alert => "Alert".to_owned(),
+                                MonitorStatus::Unknown => "Unknown".to_owned(),
                                 MonitorStatus::Warn => "Warn".to_owned(),
                                 MonitorStatus::NoData => "No Data".to_owned(),
                             },

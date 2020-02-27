@@ -38,14 +38,20 @@ pub async fn get_monitor_details(
 
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Copy)]
 pub enum MonitorStatus {
+    #[serde(rename = "Ignored")]
+    Ignored,
+    #[serde(rename = "Skipped")]
+    Skipped,
     #[serde(rename = "OK", alias = "Ok")]
     Ok,
     #[serde(rename = "No Data")]
     NoData,
     #[serde(rename = "Warn")]
     Warn,
-    #[serde(rename = "Warn")]
+    #[serde(rename = "Alert")]
     Alert,
+    #[serde(rename = "Unknown")]
+    Unknown,
 }
 
 impl Default for MonitorStatus {
@@ -58,23 +64,38 @@ impl Ord for MonitorStatus {
     fn cmp(&self, other: &Self) -> Ordering {
         use MonitorStatus::*;
         match self {
+            Ignored => match other {
+                Ignored => Ordering::Equal,
+                Skipped | Ok | NoData | Warn | Alert | Unknown => Ordering::Less,
+            },
+            Skipped => match other {
+                Ignored => Ordering::Greater,
+                Skipped => Ordering::Equal,
+                Ok | NoData | Warn | Alert | Unknown => Ordering::Less,
+            },
             Ok => match other {
+                Skipped | Ignored => Ordering::Greater,
                 Ok => Ordering::Equal,
-                NoData | Warn | Alert => Ordering::Less,
+                NoData | Warn | Alert | Unknown => Ordering::Less,
             },
             NoData => match other {
-                Ok => Ordering::Greater,
+                Skipped | Ignored | Ok => Ordering::Greater,
                 NoData => Ordering::Equal,
-                Warn | Alert => Ordering::Less,
+                Warn | Alert | Unknown => Ordering::Less,
             },
             Warn => match other {
-                Ok | NoData => Ordering::Greater,
+                Skipped | Ignored | Ok | NoData => Ordering::Greater,
                 Warn => Ordering::Equal,
-                Alert => Ordering::Less,
+                Alert | Unknown => Ordering::Less,
             },
             Alert => match other {
-                Ok | NoData | Warn => Ordering::Greater,
+                Skipped | Ignored | Ok | NoData | Warn => Ordering::Greater,
                 Alert => Ordering::Equal,
+                Unknown => Ordering::Less,
+            },
+            Unknown => match other {
+                Skipped | Ignored | Ok | NoData | Warn | Alert => Ordering::Greater,
+                Unknown => Ordering::Equal,
             },
         }
     }
@@ -88,12 +109,15 @@ impl PartialOrd for MonitorStatus {
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct MonitorState {
+    #[serde(default)]
     pub overall_state: MonitorStatus,
-    #[serde(with = "rfc3339_date_format")]
+    #[serde(default, with = "rfc3339_date_format")]
     pub overall_state_modified: Option<DateTime<Utc>>,
-    #[serde(with = "rfc3339_date_format")]
+    #[serde(default, with = "rfc3339_date_format")]
     pub modified: Option<DateTime<Utc>>,
+    #[serde(default)]
     pub options: MonitorOptions,
+    #[serde(default)]
     pub state: Option<MonitorStateDetail>,
 }
 
@@ -284,12 +308,21 @@ mod posix_date_format {
 
 #[cfg(test)]
 mod tests {
-    use crate::datadog::filter_tag_as_regex;
+    use crate::datadog::{filter_tag_as_regex, MonitorState};
 
     #[test]
     fn test_tag_to_regex() {
         assert_eq!(filter_tag_as_regex("env"), r"^env");
         assert_eq!(filter_tag_as_regex("env.foo*"), r"^env\.foo.*");
         assert_eq!(filter_tag_as_regex("env:*"), r"^env:.*");
+    }
+
+    #[test]
+    fn test_deserialize() {
+        // I have a feeling that the sample response from
+        // https://docs.datadoghq.com/api/?lang=bash#get-a-monitor-s-details
+        // is no longer likely, but we should test against it anyway
+        // such a shame that they do not provide a schema
+        let _: MonitorState = serde_json::from_str(include_str!("test_data/sample.json")).unwrap();
     }
 }
