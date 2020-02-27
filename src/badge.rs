@@ -28,6 +28,10 @@ pub struct BadgeOptions {
     pub color: String,
     /// Is the Badge muted
     pub muted: bool,
+    /// The image width, defaults to the size of the badge
+    pub width: Option<u32>,
+    /// The image height, defaults to the size of the badge
+    pub height: Option<u32>,
 }
 
 impl Default for BadgeOptions {
@@ -37,6 +41,8 @@ impl Default for BadgeOptions {
             duration: None,
             color: "#4c1".to_owned(),
             muted: false,
+            width: None,
+            height: None,
         }
     }
 }
@@ -117,7 +123,7 @@ impl Badge {
         let offset = if self.options.muted { 20 } else { 0 };
 
         let svg = format!(
-            r###"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{}" height="20">
+            r###"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{}" height="{}">
   <linearGradient id="smooth" x2="0" y2="100%">
     <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
     <stop offset="1" stop-opacity=".1"/>
@@ -141,7 +147,10 @@ impl Badge {
     <text x="{}" y="14">{}</text>
   </g>
 </svg>"###,
-            offset + left_width + right_width,
+            self.options
+                .width
+                .unwrap_or_else(|| offset + left_width + right_width),
+            self.options.height.unwrap_or(20),
             offset + left_width + right_width,
             offset + left_width,
             self.options.color,

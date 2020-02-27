@@ -41,7 +41,17 @@ async fn get_monitor_badge(
         Lazy::new(|| Mutex::new(TimedCache::with_lifespan(*MAX_AGE_SECONDS)));
 
     let mut query = query.clone();
-    query.remove("badge-poll");
+    // remove the `ts` query parameter that browser-side JavaScript may inject to force browser refetch
+    query.remove("ts");
+    // remove the width overrode
+    let width: Option<u32> = query
+        .remove("w")
+        .and_then(|v| v.parse().map(Some).unwrap_or(None));
+    // remove the height overrode
+    let height = query
+        .remove("h")
+        .and_then(|v| v.parse().map(Some).unwrap_or(None));
+
     let query = query;
 
     let key = (account.clone(), id.clone(), query.clone());
@@ -53,7 +63,14 @@ async fn get_monitor_badge(
                 .status(*status_code)
                 .header("Content-Type", "image/svg+xml")
                 .header("Cache-Control", format!("public,max-age={}", max_age))
-                .body(Badge::new(options.clone()).to_svg())
+                .body(
+                    Badge::new(BadgeOptions {
+                        width,
+                        height,
+                        ..options.clone()
+                    })
+                    .to_svg(),
+                )
                 .map_err(|_| not_found());
         }
     }
@@ -72,6 +89,8 @@ async fn get_monitor_badge(
                 BadgeOptions {
                     status: "HTTP/500 Internal Server Error".to_owned(),
                     color: COLOR_WARNING.to_owned(),
+                    width,
+                    height,
                     ..BadgeOptions::default()
                 },
                 if status_codes { 500 } else { 200 },
@@ -108,6 +127,8 @@ async fn get_monitor_badge(
                                 MonitorStatus::NoData => "No Data".to_owned(),
                             },
                             muted: !value.options.silenced.is_empty(),
+                            width,
+                            height,
                         },
                         200,
                     )
@@ -116,6 +137,8 @@ async fn get_monitor_badge(
                         BadgeOptions {
                             status: response.status().as_str().to_owned(),
                             color: COLOR_WARNING.to_owned(),
+                            width,
+                            height,
                             ..BadgeOptions::default()
                         },
                         if status_codes {
@@ -132,6 +155,8 @@ async fn get_monitor_badge(
             BadgeOptions {
                 status: format!("Unconfigured account: {}", account),
                 color: COLOR_OTHER.to_owned(),
+                width,
+                height,
                 ..BadgeOptions::default()
             },
             if status_codes { 404 } else { 200 },

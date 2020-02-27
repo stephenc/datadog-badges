@@ -25,8 +25,12 @@ If your team's Datadog is hosted at `example-team.datadoghq.com` then you would 
 The badges will be available at URLs: `http://hostname:8080/account/{subdomain}/monitors/{monitorId}`.
 Using our example again, monitor 12345 would be exposed on `http://hostname:8080/account/example-team/monitors/12345` 
 
-The query parameter `?q` can be used to filter the results of the status check, using our best guess as to how filters work, e.g. `http://hostname:8080/account/example-team/monitors/12345?q=env%3Aprod` should give the same results as available from datadog at `https://example-team.datadoghq.com/monitors/12345?q=env%3Aprod`. 
+The query parameter `q` can be used to filter the results of the status check, using our best guess as to how filters work, e.g. `http://hostname:8080/account/example-team/monitors/12345?q=env%3Aprod` should give the same results as available from datadog at `https://example-team.datadoghq.com/monitors/12345?q=env%3Aprod`. 
 Pull Requests welcome if you identify any issues with how we parse this string compared with how Datadog parses it.
+
+The query parameters `w` and `h` can be used to override the SVG document image sizes (the badge will still be auto-sized to content), which can be useful if you are say including the badge in another SVG image.
+
+The query parameter `ts` will always be ignored, so you can safely set this to the current time if you need to force the browser to refresh the image on the page.
 
 The following line options cane be used to modify the server configuration:
 
