@@ -173,7 +173,7 @@ impl MonitorState {
                     let mut filtered: Vec<(MonitorStatus, Option<DateTime<Utc>>)> = groups
                         .iter()
                         .filter(|(k, _)| match &filter {
-                            Some(s) => s.is_match(k),
+                            Some(s) => k.split(",").any(|k| s.is_match(k)),
                             None => true,
                         })
                         .map(|(_, v)| match v.status {
@@ -308,7 +308,8 @@ mod posix_date_format {
 
 #[cfg(test)]
 mod tests {
-    use crate::datadog::{filter_tag_as_regex, MonitorState};
+    use chrono::{DateTime, Utc};
+    use crate::datadog::{filter_tag_as_regex, MonitorState, MonitorStatus};
 
     #[test]
     fn test_tag_to_regex() {
@@ -323,6 +324,8 @@ mod tests {
         // https://docs.datadoghq.com/api/?lang=bash#get-a-monitor-s-details
         // is no longer likely, but we should test against it anyway
         // such a shame that they do not provide a schema
-        let _: MonitorState = serde_json::from_str(include_str!("test_data/sample.json")).unwrap();
+        let v: MonitorState = serde_json::from_str(include_str!("test_data/sample.json")).unwrap();
+        assert_eq!(v.status(None), (MonitorStatus::Alert, Some( DateTime::parse_from_rfc3339("2016-12-16T17:26:00Z").unwrap().with_timezone(&Utc))));
+        assert_eq!(v.status(Some("host:host0")), (MonitorStatus::Alert, Some( DateTime::parse_from_rfc3339("2016-12-16T17:26:00Z").unwrap().with_timezone(&Utc))));
     }
 }
